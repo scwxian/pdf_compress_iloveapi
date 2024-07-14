@@ -1,0 +1,67 @@
+#!/bin/zsh
+
+# Function to get auth token
+get_auth_token() {
+  AUTH_RESPONSE=$(curl -s -X POST "https://api.ilovepdf.com/v1/auth" -H "Content-Type:application/json" -d '{"public_key":"'${public_key}'"}')
+  echo $(echo $AUTH_RESPONSE | jq -r '.token')
+}
+
+# Function to start a task
+start_task() {
+  TASK_RESPONSE=$(curl -s -X GET "https://api.ilovepdf.com/v1/start/compress" -H "Authorization: Bearer $1" -H "Content-Type: application/json")
+  SERVER_URL=$(echo $TASK_RESPONSE | jq -r '.server')
+  TASK_ID=$(echo $TASK_RESPONSE | jq -r '.task')
+  echo "$SERVER_URL $TASK_ID"
+}
+
+# Function to upload a file
+upload_file() {
+  UPLOAD_RESPONSE=$(curl -s "$1" -H "Authorization: Bearer $2" -F "task=$3" -F "file=@$4")
+  SERVER_FILENAME=$(echo $UPLOAD_RESPONSE | jq -r '.server_filename')
+  echo "$SERVER_FILENAME"
+}
+
+# Function to build Process JSON
+build_process_json() {
+  cat <<EOF
+    {
+        "task": "$1",
+        "tool": "compress",
+        "files": [
+            {
+            "server_filename": "$2",
+            "filename": "$3"
+            }
+        ],
+        "output_filename": "{filename}"
+    }
+EOF
+}
+
+# Function to start the process
+start_process() {
+  PROCESS_RESPONSE=$(curl -s -g "$1" -H "Authorization: Bearer $2" -H "Content-Type: application/json" -d ''$3'')
+  DOWNLOAD_FILENAME=$(echo $PROCESS_RESPONSE | jq -r '.download_filename')
+  echo "$DOWNLOAD_FILENAME"
+}
+
+# Function to download the file
+download_file() {
+  curl --clobber -O -J -L -H "Authorization: Bearer $1" "$2" --output-dir "$3"
+}
+
+# Main script execution
+FILE_DIR=$1
+FILE_NAME=${FILE_DIR:t}
+FILE_PATH=${FILE_DIR:h}
+AUTH_TOKEN=$(get_auth_token)
+TASK_INFO=($(start_task $AUTH_TOKEN))
+SERVER_URL=https://${TASK_INFO[1]}/v1
+TASK_ID=${TASK_INFO[2]}
+UPLOAD_URL=$SERVER_URL/upload
+PROCESS_URL=$SERVER_URL/process
+DOWNLOAD_URL=$SERVER_URL/download/$TASK_ID
+SERVER_FILENAME=$(upload_file $UPLOAD_URL $AUTH_TOKEN $TASK_ID $FILE_DIR)
+PROCESS_JSON=$(build_process_json $TASK_ID $SERVER_FILENAME $FILE_NAME)
+NEW_DOWNLOADED_FILE_NAME=$(start_process $PROCESS_URL $AUTH_TOKEN $PROCESS_JSON)
+download_file $AUTH_TOKEN $DOWNLOAD_URL $FILE_PATH
